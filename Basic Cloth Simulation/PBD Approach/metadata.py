@@ -11,31 +11,33 @@ background_color = (1, 1, 1)
 
 
 # physical setting
-dt = 3e-3
+dt = 0.002
 t_inverse = 1 / (dt * dt)
-num_substep = 1
+num_substep = 64
 damping = 0.99
 gravity = tm.vec3(0, -9.81, 0)
-frictional_coef = 0.5
+mu_T = 0.8
+mu_N = 0.2
 
 """
 Below are Cloth setting
 """
 # number of vertices per side
-n = 68
+n = 128
 
 # total cloth grid length
 grid_length = 2
 grid_interval = grid_length / n
 
 # mass matrix
-mass = 1
+total_mass = 1
+mass = total_mass / (n * n)
 
 # spring coefficient
-spring_k = 3e4
+spring_k = 8000
 
 
 """
 Below are Sphere setting
 """
-sphere_radius = 0.3
+sphere_radius = 0.4

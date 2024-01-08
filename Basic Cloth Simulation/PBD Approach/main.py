@@ -11,7 +11,6 @@ v = ti.Vector.field(3, dtype=float, shape=(n, n))
 sum_x = ti.Vector.field(3, dtype=float, shape=(n, n))
 sum_n = ti.field(dtype=int, shape=(n, n))
 
-static_vertices = ti.Vector.field(3, dtype=float, shape=2)
 vertices = ti.Vector.field(3, dtype=float, shape=n * n)
 colors = ti.Vector.field(3, dtype=float, shape=n * n)
 triangles = ti.field(dtype=int, shape=(n - 1) * (n - 1) * 6)
@@ -25,10 +24,6 @@ neighbor_offset.append(ti.Vector([-1, -1]))
 neighbor_offset.append(ti.Vector([1, 1]))
 neighbor_offset.append(ti.Vector([-1, 1]))
 neighbor_offset.append(ti.Vector([1, -1]))
-neighbor_offset.append(ti.Vector([0, 2]))
-neighbor_offset.append(ti.Vector([0, -2]))
-neighbor_offset.append(ti.Vector([2, 0]))
-neighbor_offset.append(ti.Vector([-2, 0]))
 
 sphere_pos = ti.Vector.field(3, dtype=float, shape=1)
 sphere_pos[0] = [0, 0, 0]
@@ -46,9 +41,6 @@ def init_cloth():
         v[i, j] = [0, 0, 0]
         sum_x[i, j] = [0, 0, 0]
         sum_n[i, j] = 0
-
-    static_vertices[0] = x[0, 0]
-    static_vertices[1] = x[n-1, 0]
 
     for i, j in ti.ndrange(n-1, n-1):
         index = 6 * (i * (n - 1) + j)
@@ -71,11 +63,13 @@ def handle_collision():
         dist = vertex2sphere.norm()
         if dist <= sphere_radius:
             normal = vertex2sphere.normalized()
+            # impulse approach
             x[i, j] = sphere_pos[0] + sphere_radius * normal
             if v[i, j].dot(normal) < 0:
-                # I do not want bounce back but frictional force
-                vt = v[i, j] - v[i, j].dot(normal) * normal
-                v[i, j] = (1 - frictional_coef) * vt
+                vn = v[i, j].dot(normal) * normal
+                vt = v[i, j] - vn
+                alpha = max(0, 1 - mu_T * (1 + mu_N) * vn.norm() / vt.norm())
+                v[i, j] = -mu_N * vn + alpha * vt
 
 
 @ti.kernel
@@ -85,8 +79,13 @@ def update():
         v[i, j] += gravity * dt
         x[i, j] += v[i, j] * dt
 
+
 @ti.kernel
 def substep():
+    for i, j in x:
+        sum_x[i, j] = [0, 0, 0]
+        sum_n[i, j] = 0
+
     for i, j in x:
         for offset in ti.static(neighbor_offset):
             nrow = i + offset[0]  # neighbor row
@@ -96,6 +95,7 @@ def substep():
                 Le = offset.norm() * grid_interval
                 dir = (x[i, j] - x[nrow, ncol]).normalized()
                 sum_x[i, j] += 0.5 * (x[i, j] + x[nrow, ncol] + Le * dir)
+                # sum_x[nrow, ncol] += 0.5 * (x[i, j] + x[nrow, ncol] - Le * dir)
 
     for i, j in x:
         v[i, j] += 1 / dt * ((0.2 * x[i, j] + sum_x[i, j]) / (0.2 + sum_n[i, j]) - x[i, j])
@@ -104,13 +104,7 @@ def substep():
 
 @ti.kernel
 def assign_vertices():
-    # use to keep one side of vertices static
-    x[0, 0] = static_vertices[0]
-    x[n-1, 0] = static_vertices[1]
-
     for i, j in x:
-        sum_x[i, j] = [0, 0, 0]
-        sum_n[i, j] = 0
         vertices[i * n + j] = x[i, j]
 
 
@@ -124,13 +118,14 @@ camera = ti.ui.Camera()
 init_cloth()
 
 while window.running:
-
-    update()
-    for i in range(num_substep):
-        substep()
-        assign_vertices()
-    handle_collision()
+    for i in range(2):
+        update()
+        for j in range(num_substep):
+            substep()
+        handle_collision()
     time += dt
+
+    assign_vertices()
 
     camera.position(0.0, 0.0, 3)
     camera.lookat(0.0, 0.0, 0)
